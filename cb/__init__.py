@@ -2,6 +2,7 @@ import json
 from os.path import isfile
 
 from cb.code_bert_mlm import CodeBertMlmFillMask, MAX_TOKENS, MAX_BATCH_SIZE
+from cb.codeT5.code_t5_fim import CodeT5FillMask
 from cb.json_locs_parser import JobConfig
 from cb.json_locs_parser import ListFileLocations
 
@@ -58,7 +59,7 @@ def predict_json(masked_code_tokens_json: str, masked_token: str = None):
     return result
 
 
-def predict_json_locs(sc_json_file: str, cbm: CodeBertMlmFillMask = None, job_config=JobConfig(), max_size=MAX_TOKENS,
+def predict_json_locs(sc_json_file: str, cbm = None, job_config=JobConfig(), max_size=MAX_TOKENS,
                       batch_size=MAX_BATCH_SIZE, repo_dir=None):
     if cbm is None:
         cbm = CodeBertMlmFillMask()
@@ -67,7 +68,7 @@ def predict_json_locs(sc_json_file: str, cbm: CodeBertMlmFillMask = None, job_co
     return predict_locs(file_locs, cbm, job_config, max_size=max_size, batch_size=batch_size, repo_dir=repo_dir)
 
 
-def predict_locs(file_locs: ListFileLocations, cbm: CodeBertMlmFillMask = None, job_config=JobConfig(),
+def predict_locs(file_locs: ListFileLocations, cbm = None, job_config=JobConfig(),
                  max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE, repo_dir=None):
     if cbm is None:
         cbm = CodeBertMlmFillMask()

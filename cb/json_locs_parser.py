@@ -12,6 +12,8 @@ from pandas import DataFrame
 from pydantic import BaseModel
 
 from cb.code_bert_mlm import CodeBertMlmFillMask, MAX_TOKENS, MASK, ListCodeBertPrediction, MAX_BATCH_SIZE
+from cb.codeT5.code_t5_fim import CodeT5FillMask
+
 from cb.job_config import JobConfig
 from cb.predict_json_locs import surround_method, cut_method
 from cb.replacement_mutants import FileReplacementMutants, DetailedReplacementMutant
@@ -43,7 +45,7 @@ class Location(BaseModel):
         start = code_position.startPosition
         end = code_position.endPosition
         self.original_token = file_string[start: end + 1]
-        masked_method_string = file_string[method_start: start] + MASK + file_string[end + 1: method_end + 1]
+        masked_method_string = file_string[method_start: start] + cbm.mask + file_string[end + 1: method_end + 1]
         masked_method_tokens = cbm.tokenize(masked_method_string)
         if method_before_tokens is not None and method_after_tokens is not None:
             masked_method_tokens = method_before_tokens + masked_method_tokens + method_after_tokens
@@ -159,8 +161,8 @@ class LineLocations(BaseModel):
             [loc.predictions is not None and loc.predictions.job_done(job_config) for loc in
              self.unique_locations(with_preds_only=False)]
         )
-
-    def process_locs(self, cbm, file_string, method_start, method_end, method_tokens, method_before_tokens,
+    def process_locs(self, cbm, file_string, method_start, method_end, method_tokens,
+                     method_before_tokens,
                      method_after_tokens, job_config: JobConfig, max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE):
         # log.info('pred : line {0}'.format(str(self.line_number)))
         # fixme make sure the the locations are unique, use unique_locations when possible.
@@ -170,11 +172,17 @@ class LineLocations(BaseModel):
                                  method_before_tokens, method_after_tokens, max_size=max_size)
                 for loc in self.locations]
 
-        # predict
-        masked_codes = [cbm.decode_tokens_to_str(masked_code_tokens_req[1]) for masked_code_tokens_req in reqs]
+        if isinstance(cbm, CodeT5FillMask):
+            masked_codes = [{'masked_code': cbm.decode_tokens_to_str(masked_code_tokens_req[1]),
+                               'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
+                              masked_code_tokens_req in reqs]
+            for code in masked_codes:
+                assert 0 < cbm.tokens_count(code['masked_code']) <= 512
+        else:
+            masked_codes = [cbm.decode_tokens_to_str(masked_code_tokens_req[1]) for masked_code_tokens_req in reqs]
 
-        for code in masked_codes:
-            assert 0 < cbm.tokens_count(code) <= 512
+            for code in masked_codes:
+                assert 0 < cbm.tokens_count(code) <= 512
 
         if self.has_predictions():
             log.info('skipped predictions already processed line.')
@@ -182,7 +190,7 @@ class LineLocations(BaseModel):
         else:
             # predicting...
             # masked_code is an array of code containing a masking token
-            # for each masked_code_item we will receieve an array of 5 predictions
+            # for each masked_code_item we will receive an array of 5 predictions
             # [[]]
             predictions_arr_arr = cbm.call_func(masked_codes, batch_size=batch_size)
 
@@ -232,7 +240,7 @@ class MethodLocations(BaseModel):
     def job_done(self, job_config):
         return all([loc.job_done(job_config) for loc in self.line_predictions])
 
-    def process_locs(self, cbm: CodeBertMlmFillMask, file_string, job_config, max_size: int = MAX_TOKENS,
+    def process_locs(self, cbm, file_string, job_config, max_size: int = MAX_TOKENS,
                      batch_size=MAX_BATCH_SIZE):
         # log.info('pred : method {0}'.format(self.methodSignature))
         # log.info('--- parallel {0}'.format(str(parallel)))

@@ -40,7 +40,7 @@ class CbSizeFitter(SizeFitter):
 
 
 class CodeBertModel:
-
+    mask = MASK
     def save_pretrained(self, vocab_dir):
         self.model.save_pretrained(vocab_dir + '/')
         self.tokenizer.save_pretrained(vocab_dir + '/')
@@ -204,8 +204,8 @@ class CodeBertFunction(CodeBertModel):
 
 
 class CodeBertPrediction(BaseModel):
-    score: float
-    token: int
+    score: float = None
+    token: int = None
     token_str: str
     match_org: bool = None
     match_org_nosuf: bool = None
