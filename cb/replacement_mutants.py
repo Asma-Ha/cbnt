@@ -126,7 +126,7 @@ class ReplacementMutant:
                                              tmp_original_file=tmp_original_file,
                                              patch_diff=patch_diff, java_file=java_file)
                 try:
-                    self.broken_tests = project.test()
+                    self.broken_tests = project.test(file=self.file_path)
                 except TimeoutExpired:
                     self.broken_tests = TESTS_TIME_OUT_RESULT
         finally:
