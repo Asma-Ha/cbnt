@@ -13,7 +13,8 @@ log.addHandler(logging.StreamHandler(sys.stdout))
 def clone_checkout(url, repo_dir, rev_hash):
     log.debug(os.getcwd())
     log.info('Cloning {0} into {1}'.format(url, repo_dir))
-    os.system('git clone ' + url + ' ' + repo_dir)
+    cmd = ('git clone ' + url + ' ' + repo_dir)
+    os.system(cmd)
     with safe_chdir(repo_dir):
         log.info('checking-out {0}'.format(rev_hash))
         os.system('git checkout ' + rev_hash)
