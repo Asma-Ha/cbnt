@@ -85,6 +85,7 @@ class CodeT5Function(CodeT5Model):
         super().__init__(pretrained_model_name, vocab_dir, vocab_file)
 
     def completion_function(self, arg):
+        print('prediction with codeT5')
         input_ids = self.tokenizer(arg['masked_code'], return_tensors="pt")["input_ids"]
         outputs = self.model.generate(input_ids, num_beams=20, num_return_sequences=PREDICTIONS_COUNT,
                                       max_new_tokens=arg['original_token_len'])
