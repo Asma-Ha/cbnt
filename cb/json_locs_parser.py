@@ -5,12 +5,12 @@ import sys
 from enum import Enum
 from os.path import isfile, join, isdir
 from typing import List, Dict
-
+import random
 import numpy as np
 import pandas as pd
 from pandas import DataFrame
 from pydantic import BaseModel
-
+import json
 from cb.code_bert_mlm import CodeBertMlmFillMask, MAX_TOKENS, MASK, ListCodeBertPrediction, MAX_BATCH_SIZE
 from cb.codeT5.code_t5_fim import CodeT5FillMask
 
@@ -22,6 +22,8 @@ from utils.file_read_write import load_file
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.StreamHandler(sys.stdout))
+
+MAX_IDS_SIZE = 100
 
 
 class CodePosition(BaseModel):
@@ -163,7 +165,8 @@ class LineLocations(BaseModel):
         )
     def process_locs(self, cbm, file_string, method_start, method_end, method_tokens,
                      method_before_tokens,
-                     method_after_tokens, job_config: JobConfig, max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE):
+                     method_after_tokens, job_config: JobConfig, max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE,
+                     instruction=None):
         # log.info('pred : line {0}'.format(str(self.line_number)))
         # fixme make sure the the locations are unique, use unique_locations when possible.
 
@@ -173,9 +176,14 @@ class LineLocations(BaseModel):
                 for loc in self.locations]
 
         if isinstance(cbm, CodeT5FillMask):
-            masked_codes = [{'masked_code': cbm.decode_tokens_to_str(masked_code_tokens_req[1]),
-                               'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
-                              masked_code_tokens_req in reqs]
+            if instruction:
+                masked_codes = [{'masked_code': instruction + cbm.decode_tokens_to_str(masked_code_tokens_req[1]),
+                                 'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
+                                masked_code_tokens_req in reqs]
+            else:
+                masked_codes = [{'masked_code': cbm.decode_tokens_to_str(masked_code_tokens_req[1]),
+                                 'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
+                                masked_code_tokens_req in reqs]
             for code in masked_codes:
                 assert 0 < cbm.tokens_count(code['masked_code']) <= 512
         else:
@@ -240,8 +248,42 @@ class MethodLocations(BaseModel):
     def job_done(self, job_config):
         return all([loc.job_done(job_config) for loc in self.line_predictions])
 
+    def build_identifier_instruction(self, cbm, identifiers_list, rand=True):
+        identifiers_string = ', '.join(identifiers_list)
+        ins = f"/*use [{identifiers_string}] to predict the masked token*/"
+        tokenized_ins = cbm.tokenize(ins)
+        print('len and instruction before :', len(tokenized_ins), ins)
+        if len(tokenized_ins) > MAX_IDS_SIZE:
+            identifiers_string = ''
+            ins = f"/*use [] to predict the masked token*/"
+            tokenized_ins = cbm.tokenize(ins)
+            L = identifiers_list
+            if len(identifiers_list) == 0:
+                print("empty identifier list")
+            if rand:
+                while True:
+                    random_id = random.choice(list(L))
+                    L.remove(random_id)
+                    current_length = len(tokenized_ins) + len(cbm.tokenize(identifiers_string)) + len(
+                        cbm.tokenize(random_id)) if len(identifiers_string) > 0 else len(tokenized_ins) + len(
+                        cbm.tokenize(random_id))
+                    if current_length < MAX_IDS_SIZE - 1:
+                        identifiers_string += random_id + ', '
+                    else:
+                        break
+
+            ins_before_list = ins[:ins.find('[') + 1]
+            ins_after_list = ins[ins.find(']'):]
+            ins = ins_before_list + identifiers_string + ins_after_list
+
+            print('len and instruction after :', len(cbm.tokenize(ins)), ins)
+            assert len(cbm.tokenize(ins)) <= MAX_IDS_SIZE
+
+        return ins
+
     def process_locs(self, cbm, file_string, job_config, max_size: int = MAX_TOKENS,
-                     batch_size=MAX_BATCH_SIZE):
+                     batch_size=MAX_BATCH_SIZE, identifiers_list=None):
+        print('Identifier list : ', identifiers_list)
         # log.info('pred : method {0}'.format(self.methodSignature))
         # log.info('--- parallel {0}'.format(str(parallel)))
         if self.job_done(job_config):
@@ -257,6 +299,12 @@ class MethodLocations(BaseModel):
         method_tokens = cbm.tokenize(method_string)
         method_before_tokens = None
         method_after_tokens = None
+
+        instruction = None
+        if identifiers_list is not None:
+            instruction = self.build_identifier_instruction(cbm, identifiers_list)
+            max_size -= len(cbm.tokenize(instruction))
+
         if len(method_tokens) < max_size:
             max_tokens_to_add = max_size - len(method_tokens)
             method_before_str = file_string[max(0, method_start - max_tokens_to_add):method_start - 1]
@@ -269,7 +317,8 @@ class MethodLocations(BaseModel):
 
         for line_loc in self.line_predictions:
             line_loc.process_locs(cbm, file_string, method_start, method_end, method_tokens, method_before_tokens,
-                                  method_after_tokens, job_config, max_size=max_size, batch_size=batch_size)
+                                  method_after_tokens, job_config, max_size=max_size, batch_size=batch_size,
+                                  instruction=instruction)
 
 
 class ClassLocations(BaseModel):
@@ -279,6 +328,7 @@ class ClassLocations(BaseModel):
 
 class FileLocations(BaseModel):
     file_path: str = None
+    identifiers: Dict = {}
     classPredictions: List[ClassLocations] = None
 
     def get_relative_path(self, source_dir):
@@ -287,11 +337,34 @@ class FileLocations(BaseModel):
     def job_done(self, job_config):
         return all([m.job_done(job_config) for c in self.classPredictions for m in c.methodPredictions])
 
-    def process_locs(self, cbm, job_config, max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE, repo_dir=None):
+    def process_ids(self, ids_json_file):
+        with open(ids_json_file, 'r') as f:
+            data = json.load(f)
+            #map each method to its identifiers
+            for method in data.get('methods'):
+                identifiers_set: set = set()
+                identifiers_set.update(method.get("identifiers"))
+                #class fields
+                identifiers_set.update(data.get("identifiers"))
+                #accessible methods
+                other_methods_in_class = [obj.get("methodName") for obj in data.get('methods') if
+                                          obj.get("methodName") != method.get("methodName") and obj.get(
+                                              "parent_class") == data.get('className')]
+                identifiers_set.update(other_methods_in_class)
+                #add to dictionary
+                self.identifiers[method.get("start_location")] = identifiers_set
+
+    def process_locs(self, cbm, job_config, max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE, repo_dir=None,
+                     ids_json_file=None):
         if self.job_done(job_config):
             log.info('skipped already processed file {0}'.format(self.file_path))
             return
         log.info('pred : file {0}'.format(self.file_path))
+
+        if ids_json_file is not None and len(self.identifiers) == 0:
+            print("processing json file")
+            self.process_ids(ids_json_file)
+
         try:
             try:
                 file_string = load_file(self.file_path)
@@ -316,7 +389,12 @@ class FileLocations(BaseModel):
                 # log.info('pred : class {0}'.format(class_loc.qualifiedName))
                 method_locs = class_loc.methodPredictions
                 for method_loc in method_locs:
-                    method_loc.process_locs(cbm, file_string, job_config, max_size=max_size, batch_size=batch_size)
+                    if len(self.identifiers) > 0 and len(self.identifiers) >= len(method_locs):
+                        identifiers_list = self.identifiers[method_loc.codePosition.startPosition]
+                        method_loc.process_locs(cbm, file_string, job_config, max_size=max_size, batch_size=batch_size,
+                                                identifiers_list=identifiers_list)
+                    else:
+                        method_loc.process_locs(cbm, file_string, job_config, max_size=max_size, batch_size=batch_size)
         except UnicodeDecodeError:
             log.exception('Failed to load file : {0}'.format(self.file_path))
 
@@ -383,9 +461,11 @@ class ListFileLocations(BaseModel):
     def job_done(self, job_config):
         return all([file_loc.job_done(job_config) for file_loc in self.__root__])
 
-    def process_locs(self, cbm, job_config=JobConfig(), max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE, repo_dir=None):
+    def process_locs(self, cbm, job_config=JobConfig(), max_size=MAX_TOKENS, batch_size=MAX_BATCH_SIZE, repo_dir=None,
+                     ids_json_file=None):
         for file_loc in self.__root__:
-            file_loc.process_locs(cbm, job_config, max_size=max_size, batch_size=batch_size, repo_dir=repo_dir)
+            file_loc.process_locs(cbm, job_config, max_size=max_size, batch_size=batch_size, repo_dir=repo_dir,
+                                  ids_json_file=ids_json_file)
 
     def to_methods_list(self, proj_bug_id, version) -> List[Method]:
         return [Method(proj_bug_id, fileP, classP, methodP, version)
