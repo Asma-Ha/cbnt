@@ -41,6 +41,7 @@ class CbSizeFitter(SizeFitter):
 
 class CodeBertModel:
     mask = MASK
+    max_tokens = MAX_TOKENS
     def save_pretrained(self, vocab_dir):
         self.model.save_pretrained(vocab_dir + '/')
         self.tokenizer.save_pretrained(vocab_dir + '/')

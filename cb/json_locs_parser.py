@@ -13,9 +13,9 @@ from pydantic import BaseModel
 import json
 from cb.code_bert_mlm import CodeBertMlmFillMask, MAX_TOKENS, MASK, ListCodeBertPrediction, MAX_BATCH_SIZE
 from cb.codeT5.code_t5_fim import CodeT5FillMask
-
+from cb.codeLlama.code_llama_fim import CodeLlamaFillMask
 from cb.job_config import JobConfig
-from cb.predict_json_locs import surround_method, cut_method
+from cb.predict_json_locs import surround_method, cut_method, cut_method_codellama
 from cb.replacement_mutants import FileReplacementMutants, DetailedReplacementMutant
 from utils.assertion_utils import is_empty_strip
 from utils.file_read_write import load_file
@@ -52,8 +52,13 @@ class Location(BaseModel):
         if method_before_tokens is not None and method_after_tokens is not None:
             masked_method_tokens = method_before_tokens + masked_method_tokens + method_after_tokens
         if len(masked_method_tokens) > max_size:
-            start_cutting_index, masked_method_tokens = cut_method(masked_method_tokens, max_size,
-                                                                   int(max_size / 3), MASK)
+            if isinstance(cbm, CodeLlamaFillMask) :
+                start_cutting_index, masked_method_tokens = cut_method_codellama(masked_method_tokens, max_size,
+                                                                       int(max_size / 3), cbm.special_tokens)
+            else :
+                start_cutting_index, masked_method_tokens = cut_method(masked_method_tokens, max_size,
+                                                                   int(max_size / 3), cbm.mask)
+
             original_method_tokens = method_tokens[start_cutting_index: max_size + start_cutting_index]
         else:
             original_method_tokens = method_tokens
@@ -175,7 +180,7 @@ class LineLocations(BaseModel):
                                  method_before_tokens, method_after_tokens, max_size=max_size)
                 for loc in self.locations]
 
-        if isinstance(cbm, CodeT5FillMask):
+        if isinstance(cbm, CodeT5FillMask) or isinstance(cbm, CodeLlamaFillMask):
             if instruction:
                 masked_codes = [{'masked_code': instruction + cbm.decode_tokens_to_str(masked_code_tokens_req[1]),
                                  'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
@@ -185,12 +190,12 @@ class LineLocations(BaseModel):
                                  'original_token_len': len(cbm.tokenize(masked_code_tokens_req[0]))} for
                                 masked_code_tokens_req in reqs]
             for code in masked_codes:
-                assert 0 < cbm.tokens_count(code['masked_code']) <= 512
+                assert 0 < cbm.tokens_count(code['masked_code']) <= cbm.max_tokens + 12
         else:
             masked_codes = [cbm.decode_tokens_to_str(masked_code_tokens_req[1]) for masked_code_tokens_req in reqs]
 
             for code in masked_codes:
-                assert 0 < cbm.tokens_count(code) <= 512
+                assert 0 < cbm.tokens_count(code) <= cbm.max_tokens + 12
 
         if self.has_predictions():
             log.info('skipped predictions already processed line.')

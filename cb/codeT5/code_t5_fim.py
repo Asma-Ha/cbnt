@@ -41,6 +41,8 @@ class CbSizeFitter(SizeFitter):
 
 class CodeT5Model(CodeBertModel):
     mask = MASK
+    max_tokens = MAX_TOKENS
+
     @staticmethod
     def load_vocab(vocab_file):
         import collections
@@ -85,11 +87,10 @@ class CodeT5Function(CodeT5Model):
         super().__init__(pretrained_model_name, vocab_dir, vocab_file)
 
     def completion_function(self, arg):
-        print('prediction with codeT5')
+        print(arg, "\n")
         input_ids = self.tokenizer(arg['masked_code'], return_tensors="pt")["input_ids"]
         outputs = self.model.generate(input_ids, num_beams=20, num_return_sequences=PREDICTIONS_COUNT,
                                       max_new_tokens=arg['original_token_len'])
-        print('context : ', arg['masked_code'])
         return self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
     def call_func(self, arg):

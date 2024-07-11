@@ -8,32 +8,55 @@ DOC_END = '*/'
 
 
 def cut_method(tokens, size, minimalNumberOfItemsAfterItem, item_to_keep):
-    """
-    /**
-     * Call this to get a sublist
-     * of a fixed {@code size}
-     * from a given original {@code list} of items
-     * including a given {@code item}
-     * with - if it applies - a minimum number of items after that included item {@code minimalNumberOfItemsAfterItem}.
-     * example:
-     * list=["hel","lo"," ","morni","ng","!"]
-     * subListIncludingItem(list," ",4,1) --> ["hel","lo"," ","morni"]
-     * subListIncludingItem(list," ",4,2) --> ["lo"," ","morni","ng"]
-     * subListIncludingItem(list," ",5,1) --> [hel","lo"," ","morni","ng"]
-     *
-     * @param tokens                          original list. It must be bigger or of the same size as {@code size}.
-     * @param item_to_keep                          item to be included.
-     * @param size                          size of the sublist.
-     * @param minimalNumberOfItemsAfterItem minimum number of items after that included item. It must be less than size.
-     * @param <T>                           Type of the items.
-     * @return sublist of type {@code T} a fixed {@code size}
-     * from a given original {@code list} of items
-     * including a given {@code item}
-     * with - if it applies - a minimum number of items after that included item {@code minimalNumberOfItemsAfterItem}.
-     */
-    :param tokens:
-    :return:
-    """
+
+    assert tokens is not None and len(tokens) >= size, "Original list must be bigger or of the same size as size."
+    assert minimalNumberOfItemsAfterItem <= size / 2, "minimalNumberOfItemsAfterItem must be less than size."
+    # list already of size
+    if len(tokens) == size:
+        return tokens
+    # // list bigger.
+    listSize: int = len(tokens)
+    if item_to_keep is not None:
+        itemIndex: int = tokens.index(item_to_keep)
+        itemsAfterCount: int = listSize - itemIndex - 1
+        minimalItemsAfterCount: int = min(minimalNumberOfItemsAfterItem, itemsAfterCount)
+        maximumItemsBeforeCount: int = size - minimalItemsAfterCount - 1
+        startIndex: int = max(0, itemIndex - maximumItemsBeforeCount)
+    else:
+        startIndex: int = listSize - size
+    return startIndex, tokens[startIndex: size + startIndex]
+
+def cut_method_codellama(tokens, size, minimalNumberOfItemsAfterItem, items_to_keep):
+    #codeLlama tokenizer removes the masking token from the tokenized method and adds 3 other special tokens
+    assert tokens is not None and len(tokens) >= size, "Original list must be bigger or of the same size as size."
+    assert minimalNumberOfItemsAfterItem <= size / 2, "minimalNumberOfItemsAfterItem must be less than size."
+    # list already of size
+    if len(tokens) == size:
+        return tokens
+    # // list bigger.
+    listSize: int = len(tokens)
+
+    #if there are special tokens : the tokens always start with the token <_PRE>
+    if tokens[0] in items_to_keep:
+        size = size - 2
+        sufIndex : int = tokens.index(items_to_keep[1])
+        itemsAfterCount: int = listSize - sufIndex - 1
+        minimalItemsAfterCount: int = min(minimalNumberOfItemsAfterItem, itemsAfterCount)
+        maximumItemsBeforeCount: int = size - minimalItemsAfterCount - 1
+        startIndex: int = max(0, sufIndex - maximumItemsBeforeCount)
+
+        subList: list = tokens[startIndex:startIndex + size]
+        if subList[0] != items_to_keep[0]:
+            subList = [items_to_keep[0]] + subList
+        if subList[len(subList) - 1] != items_to_keep[2]:
+            subList.append(items_to_keep[2])
+        return startIndex - 1, subList
+
+    else:
+        startIndex: int = listSize - size
+        subList: list = tokens[startIndex:startIndex + size]
+        return startIndex, subList
+
     assert tokens is not None and len(tokens) >= size, "Original list must be bigger or of the same size as size."
     assert minimalNumberOfItemsAfterItem <= size / 2, "minimalNumberOfItemsAfterItem must be less than size."
     # list already of size

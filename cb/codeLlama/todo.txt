@@ -1,0 +1,9 @@
+install later version of transformers :
+pip install git+https://github.com/huggingface/transformers.git
+update torch
+install accelerate
+install : pip install -U bitsandbytes
+
+install SentencePiece
+protobuf
+restart
