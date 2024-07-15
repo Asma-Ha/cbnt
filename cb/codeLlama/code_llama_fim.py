@@ -76,8 +76,7 @@ class CodeLlamaModel(CodeBertModel):
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.float16,
             )
-            self.model = LlamaForCausalLM.from_pretrained(pretrained_model_name, device_map="auto",
-                                                          quantization_config=config)
+            self.model = LlamaForCausalLM.from_pretrained(pretrained_model_name, device_map="cuda", quantization_config=config)
             self.model.eval()
             self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
             self.save_pretrained(vocab_dir)
@@ -96,6 +95,17 @@ class CodeLlamaModel(CodeBertModel):
         self.vocab_dict = self.load_vocab(vocab_dir)
         log.info('num threads in torch:' + str(torch.get_num_threads()))
 
+    def decode_tokenids_to_str(self, code_tokens_ids) -> str:
+        assert code_tokens_ids is not None and len(
+            code_tokens_ids) > 0, "Wrong argument ! pass a source code to tokenize as string !"
+        decoded_str = self.tokenizer.decode(code_tokens_ids)
+        tokens = ['<PRE>', '<MID>']
+        for token in tokens :
+            if token in decoded_str:
+                decoded_str = decoded_str.replace(token, " ")
+        if '<SUF>' in decoded_str:
+            decoded_str = decoded_str.replace('<SUF>', " " + MASK)
+        return decoded_str
         # @list_to_tuple
         # @lru_cache(maxsize=2, typed=False)
 
@@ -112,8 +122,8 @@ class CodeLlamaFunction(CodeLlamaModel):
         print("context : ", len(self.tokenize(arg['masked_code'])), arg['masked_code'])
         input_ids = self.tokenizer(arg['masked_code'], return_tensors="pt")["input_ids"].cuda()
         with torch.no_grad():
-            outputs = self.model.generate(input_ids, max_new_tokens=arg['original_token_len'],
-                                          num_beams=20, num_return_sequences=PREDICTIONS_COUNT,
+            outputs = self.model.generate(input_ids, max_length=self.max_tokens + 12,
+                                          num_beams=5, num_return_sequences=PREDICTIONS_COUNT,
                                           pad_token_id=self.tokenizer.eos_token_id)
         decoded = self.tokenizer.batch_decode(outputs[:, input_ids.shape[1]:], skip_special_tokens=True)
         return decoded

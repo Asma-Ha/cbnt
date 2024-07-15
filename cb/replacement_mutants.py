@@ -129,6 +129,10 @@ class ReplacementMutant:
                     self.broken_tests = project.test(target_tests)
                 except TimeoutExpired:
                     self.broken_tests = TESTS_TIME_OUT_RESULT
+            else :
+                print('Mutant ', self.id, ' is not compilable')
+                print('original : ', tmp_original_file[self.start:self.end])
+                print("Mutant is : ", self.start, self.end, self.replacement)
         finally:
             if reset:
                 write_file(self.file_path, tmp_original_file)
