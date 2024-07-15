@@ -50,7 +50,7 @@ def cut_method_codellama(tokens, size, minimalNumberOfItemsAfterItem, items_to_k
             subList = [items_to_keep[0]] + subList
         if subList[len(subList) - 1] != items_to_keep[2]:
             subList.append(items_to_keep[2])
-        return startIndex - 1, subList
+        return max(0,startIndex - 1), subList
 
     else:
         startIndex: int = listSize - size
@@ -73,7 +73,6 @@ def cut_method_codellama(tokens, size, minimalNumberOfItemsAfterItem, items_to_k
     else:
         startIndex: int = listSize - size
     return startIndex, tokens[startIndex: size + startIndex]
-
 
 def surround_method(methodTokens, tokensBefore, tokensAfter, maximumTokensCount):
     tokensSize: int = len(methodTokens)
@@ -108,9 +107,11 @@ def surround_method(methodTokens, tokensBefore, tokensAfter, maximumTokensCount)
         if len(tokensAfter) > 0:
             tokensAfter = tokensAfter[0: min(maximumTokensCount - len(result), len(tokensAfter) - 1)]
             result += tokensAfter
+
     assert len(result) <= maximumTokensCount
     assert len(result) == tokensSize + len(tokensBefore) + len(tokensAfter)
-
+    if len(tokensBefore) == 0 or len(tokensAfter) == 0:
+        print('empty')
     return result, tokensBefore, tokensAfter
 
 

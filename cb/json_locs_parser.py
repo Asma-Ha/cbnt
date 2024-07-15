@@ -49,21 +49,47 @@ class Location(BaseModel):
         self.original_token = file_string[start: end + 1]
         masked_method_string = file_string[method_start: start] + cbm.mask + file_string[end + 1: method_end + 1]
         masked_method_tokens = cbm.tokenize(masked_method_string)
-        if method_before_tokens is not None and method_after_tokens is not None:
-            masked_method_tokens = method_before_tokens + masked_method_tokens + method_after_tokens
-        if len(masked_method_tokens) > max_size:
-            if isinstance(cbm, CodeLlamaFillMask) :
-                start_cutting_index, masked_method_tokens = cut_method_codellama(masked_method_tokens, max_size,
-                                                                       int(max_size / 3), cbm.special_tokens)
-            else :
-                start_cutting_index, masked_method_tokens = cut_method(masked_method_tokens, max_size,
-                                                                   int(max_size / 3), cbm.mask)
 
-            original_method_tokens = method_tokens[start_cutting_index: max_size + start_cutting_index]
-        else:
-            original_method_tokens = method_tokens
-        assert len(masked_method_tokens) <= max_size
-        return self.original_token, masked_method_tokens, original_method_tokens, self.suffix
+        if isinstance(cbm, CodeLlamaFillMask):
+            #add before and after before tokenization to place the pre, mid and suf tokens correctly
+            before_str = ''
+            after_str = ''
+            if method_before_tokens is not None and len(method_before_tokens) > 0 :
+                #print('Before tokens : ', method_before_tokens)
+                before_str = cbm.decode_tokens_to_str(
+                    method_before_tokens)
+                #print('Before : ', before_str)
+            if method_after_tokens is not None and len(method_after_tokens) > 0 :
+                #print('After tokens : ', method_after_tokens)
+                after_str = cbm.decode_tokens_to_str(method_after_tokens)
+                #print('After : ', after_str)
+
+            context_string = before_str + masked_method_string + after_str
+            masked_method_tokens = cbm.tokenize(context_string)
+
+            if len(masked_method_tokens) > max_size:
+                start_cutting_index, masked_method_tokens = cut_method_codellama(masked_method_tokens, max_size,
+                                                                                 int(max_size / 3), cbm.special_tokens)
+                original_method_tokens = method_tokens[start_cutting_index: max_size + start_cutting_index]
+            else:
+                original_method_tokens = method_tokens
+            assert len(masked_method_tokens) <= max_size
+            #print("context : ", context_string)
+            #print("masked method tokens 2 : ", masked_method_tokens)
+            return self.original_token, masked_method_tokens, original_method_tokens, self.suffix
+
+
+        else :
+            if method_before_tokens is not None and method_after_tokens is not None:
+                masked_method_tokens = method_before_tokens + masked_method_tokens + method_after_tokens
+            if len(masked_method_tokens) > max_size:
+                start_cutting_index, masked_method_tokens = cut_method(masked_method_tokens, max_size,
+                                                                       int(max_size / 3), cbm.mask)
+                original_method_tokens = method_tokens[start_cutting_index: max_size + start_cutting_index]
+            else:
+                original_method_tokens = method_tokens
+            assert len(masked_method_tokens) <= max_size
+            return self.original_token, masked_method_tokens, original_method_tokens, self.suffix
 
     def set_predictions(self, predictions: ListCodeBertPrediction):
         self.predictions = predictions
@@ -253,12 +279,13 @@ class MethodLocations(BaseModel):
     def job_done(self, job_config):
         return all([loc.job_done(job_config) for loc in self.line_predictions])
 
-    def build_identifier_instruction(self, cbm, identifiers_list, rand=True):
+    def build_identifier_instruction(self, cbm, identifiers_list, method_string, rand=True):
         identifiers_string = ', '.join(identifiers_list)
         ins = f"/*use [{identifiers_string}] to predict the masked token*/"
         tokenized_ins = cbm.tokenize(ins)
         print('len and instruction before :', len(tokenized_ins), ins)
-        if len(tokenized_ins) > MAX_IDS_SIZE:
+        max_ids_size = cbm.max_tokens/5
+        if len(tokenized_ins) > max_ids_size:
             identifiers_string = ''
             ins = f"/*use [] to predict the masked token*/"
             tokenized_ins = cbm.tokenize(ins)
@@ -272,7 +299,7 @@ class MethodLocations(BaseModel):
                     current_length = len(tokenized_ins) + len(cbm.tokenize(identifiers_string)) + len(
                         cbm.tokenize(random_id)) if len(identifiers_string) > 0 else len(tokenized_ins) + len(
                         cbm.tokenize(random_id))
-                    if current_length < MAX_IDS_SIZE - 1:
+                    if current_length < max_ids_size - 1:
                         identifiers_string += random_id + ', '
                     else:
                         break
@@ -282,7 +309,7 @@ class MethodLocations(BaseModel):
             ins = ins_before_list + identifiers_string + ins_after_list
 
             print('len and instruction after :', len(cbm.tokenize(ins)), ins)
-            assert len(cbm.tokenize(ins)) <= MAX_IDS_SIZE
+            assert len(cbm.tokenize(ins)) <= max_ids_size
 
         return ins
 
@@ -307,7 +334,7 @@ class MethodLocations(BaseModel):
 
         instruction = None
         if identifiers_list is not None:
-            instruction = self.build_identifier_instruction(cbm, identifiers_list)
+            instruction = self.build_identifier_instruction(cbm, identifiers_list, method_string)
             max_size -= len(cbm.tokenize(instruction))
 
         if len(method_tokens) < max_size:
